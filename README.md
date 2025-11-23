@@ -195,22 +195,3 @@ src/agent_smith/
 │   └── openai.py       # OpenAI GPT
 └── query.py            # Main query orchestration
 ```
-
-## Phase Documentation
-
-- **[Phase 1](PHASE1_MONOREPO.md)** - Monorepo setup and configuration
-- **[Phase 2](PHASE2_LLM_INTEGRATION.md)** - LLM API integration
-- **[Phase 3](PHASE3_TOOL_SYSTEM.md)** - Tool system implementation
-- **[Phase 4](PHASE4_TERMINAL_UI.md)** - Terminal UI with Textual ✅
-
-## Migration from TypeScript Version
-
-See [MIGRATION.md](../MIGRATION.md) for detailed migration guide.
-
-## License
-
-MIT
-
-## Contributing
-
-Contributions welcome! Please see [CONTRIBUTING.md](../CONTRIBUTING.md).
