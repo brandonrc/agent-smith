@@ -1,0 +1,163 @@
+# Example MCP (Model Context Protocol) Configuration
+# Copy this to ~/.config/agent-smith/settings.toml and customize
+
+[mcp]
+# Enable/disable MCP globally
+enabled = true
+
+# =============================================================================
+# GitLab MCP Server
+# =============================================================================
+# Provides tools for managing GitLab repositories, MRs, and issues
+#
+# Setup:
+# 1. Get a GitLab personal access token:
+#    - Go to GitLab → Settings → Access Tokens
+#    - Create token with scopes: api, read_repository, write_repository
+# 2. Replace the placeholders below with your values
+# 3. Restart Agent Smith
+
+[mcp.servers.gitlab]
+type = "stdio"
+command = "npx"
+args = ["-y", "@modelcontextprotocol/server-gitlab"]
+env = {
+    GITLAB_TOKEN = "glpat-your-token-here",      # Your GitLab personal access token
+    GITLAB_URL = "https://gitlab.com"            # Or your GitLab instance URL
+}
+enabled = false  # Set to true to enable
+trusted = false  # Will prompt for approval on first use
+
+# =============================================================================
+# Jira MCP Server
+# =============================================================================
+# Provides tools for managing Jira tickets, projects, and workflows
+#
+# Setup:
+# 1. Create a Jira API token:
+#    - Go to https://id.atlassian.com/manage-profile/security/api-tokens
+#    - Click "Create API token"
+# 2. Replace the placeholders below with your values
+# 3. Restart Agent Smith
+
+[mcp.servers.jira]
+type = "stdio"
+command = "npx"
+args = ["-y", "@modelcontextprotocol/server-jira"]
+env = {
+    JIRA_URL = "https://your-company.atlassian.net",  # Your Jira instance URL
+    JIRA_EMAIL = "your-email@company.com",            # Your Jira account email
+    JIRA_API_TOKEN = "your-api-token-here"            # Your Jira API token
+}
+enabled = false  # Set to true to enable
+trusted = false
+
+# =============================================================================
+# Filesystem MCP Server
+# =============================================================================
+# Provides secure file operations in allowed directories only
+#
+# Setup:
+# 1. Replace /allowed/directory with the path you want to allow access to
+# 2. You can specify multiple directories by adding more servers
+# 3. Restart Agent Smith
+
+[mcp.servers.filesystem]
+type = "stdio"
+command = "npx"
+args = [
+    "-y",
+    "@modelcontextprotocol/server-filesystem",
+    "/Users/yourusername/projects",  # Replace with allowed directory
+]
+env = {}
+enabled = false  # Set to true to enable
+trusted = false
+
+# =============================================================================
+# PostgreSQL MCP Server
+# =============================================================================
+# Provides tools for querying PostgreSQL databases
+#
+# Setup:
+# 1. Replace the connection string with your database details
+# 2. Connection format: postgresql://user:password@host:port/database
+# 3. Restart Agent Smith
+
+[mcp.servers.postgres]
+type = "stdio"
+command = "npx"
+args = ["-y", "@modelcontextprotocol/server-postgres"]
+env = {
+    POSTGRES_CONNECTION_STRING = "postgresql://user:password@localhost:5432/mydb"
+}
+enabled = false  # Set to true to enable
+trusted = false
+
+# =============================================================================
+# GitHub MCP Server
+# =============================================================================
+# Provides tools for managing GitHub repositories, PRs, and issues
+#
+# Setup:
+# 1. Create a GitHub personal access token:
+#    - Go to GitHub → Settings → Developer settings → Personal access tokens
+#    - Generate new token with repo scope
+# 2. Replace the placeholder below
+# 3. Restart Agent Smith
+
+[mcp.servers.github]
+type = "stdio"
+command = "npx"
+args = ["-y", "@modelcontextprotocol/server-github"]
+env = {
+    GITHUB_TOKEN = "ghp_your_token_here"
+}
+enabled = false  # Set to true to enable
+trusted = false
+
+# =============================================================================
+# Slack MCP Server
+# =============================================================================
+# Provides tools for sending messages and managing Slack workspaces
+#
+# Setup:
+# 1. Create a Slack app and get the bot token:
+#    - Go to https://api.slack.com/apps
+#    - Create new app or use existing
+#    - Install app to workspace and copy Bot User OAuth Token
+# 2. Replace the placeholder below
+# 3. Restart Agent Smith
+
+[mcp.servers.slack]
+type = "stdio"
+command = "npx"
+args = ["-y", "@modelcontextprotocol/server-slack"]
+env = {
+    SLACK_BOT_TOKEN = "xoxb-your-token-here"
+}
+enabled = false  # Set to true to enable
+trusted = false
+
+# =============================================================================
+# Notes:
+# =============================================================================
+#
+# 1. Security:
+#    - MCP servers run in isolated subprocesses
+#    - Agent Smith will prompt for approval before starting any new server
+#    - Trusted servers are tracked in ~/.local/share/agent-smith/mcp_trust.json
+#    - If you change a server's configuration, you'll need to re-approve it
+#
+# 2. Prerequisites:
+#    - Most MCP servers require Node.js (v18+)
+#    - Install: brew install node (macOS) or use nvm
+#
+# 3. Debugging:
+#    - Use `/mcp` command in Agent Smith to check server status
+#    - Check logs in ~/.local/state/agent-smith/agent_smith.log
+#    - Run with --debug flag for verbose MCP logging
+#
+# 4. More MCP Servers:
+#    - Browse available servers: https://github.com/modelcontextprotocol/servers
+#    - Create your own: https://modelcontextprotocol.io/docs

@@ -1,6 +1,7 @@
 """Tool implementations for Agent Smith."""
 
 from .agent_tool import AgentTool
+from .architect_tool import ArchitectTool
 from .base import BaseTool, ToolRegistry
 from .bash_tool import BashTool
 from .file_edit_tool import FileEditTool
@@ -30,6 +31,7 @@ default_tools.register(NotebookReadTool())
 default_tools.register(NotebookEditTool())
 default_tools.register(AgentTool())
 default_tools.register(ThinkTool())
+default_tools.register(ArchitectTool())
 
 __all__ = [
     "BaseTool",
@@ -47,5 +49,6 @@ __all__ = [
     "NotebookEditTool",
     "AgentTool",
     "ThinkTool",
+    "ArchitectTool",
     "default_tools",
 ]

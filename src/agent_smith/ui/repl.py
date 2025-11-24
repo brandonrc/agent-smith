@@ -2,7 +2,6 @@
 
 from pathlib import Path
 
-from rich.markdown import Markdown
 from rich.panel import Panel
 from textual.app import ComposeResult
 from textual.binding import Binding
@@ -11,9 +10,17 @@ from textual.screen import Screen
 from textual.widgets import Footer, Header, Input, RichLog
 
 from ..config import get_api_key
+from ..mcp_integration import get_mcp_status, initialize_mcp, shutdown_mcp
 from ..models import Message
 from ..query import QueryOrchestrator
 from ..tools import default_tools
+from .components import (
+    format_cost_info,
+    format_error,
+    format_tool_result,
+    format_tool_use,
+)
+from .message_renderer import message_renderer
 
 
 class REPLScreen(Screen):
@@ -115,6 +122,18 @@ class REPLScreen(Screen):
             )
             return
 
+        # Initialize MCP (Model Context Protocol) servers
+        log.write("[dim]Initializing MCP servers...[/dim]")
+        try:
+            await initialize_mcp(auto_approve=False)
+            mcp_status = get_mcp_status()
+            if mcp_status["initialized"] and mcp_status["tools_count"] > 0:
+                log.write(
+                    f"[green]✓[/green] MCP initialized: {len(mcp_status['servers'])} server(s), {mcp_status['tools_count']} tool(s)"
+                )
+        except Exception as e:
+            log.write(f"[yellow]⚠️  MCP initialization skipped: {e}[/yellow]")
+
         # Welcome message
         log.write(
             Panel(
@@ -159,13 +178,7 @@ class REPLScreen(Screen):
         # Display user message IMMEDIATELY (synchronous)
         log = self.query_one("#message-log", RichLog)
         log.write("")  # Empty line
-        log.write(
-            Panel(
-                Markdown(user_input),
-                title="[bold cyan]You[/bold cyan]",
-                border_style="cyan",
-            )
-        )
+        log.write(message_renderer.render_user_message(user_input))
 
         # Add to conversation
         self.messages.append(Message.user(user_input))
@@ -187,11 +200,17 @@ class REPLScreen(Screen):
                     "/model [name] - Show or change current model\n"
                     "/cost - Show detailed token usage and estimated costs\n"
                     "/tools - List all available tools\n"
+                    "/mcp - Show MCP server status\n"
                     "/doctor - Run system diagnostics\n"
-                    "/export [filename] - Export conversation to file\n\n"
+                    "/export [filename] - Export conversation to file\n"
+                    "/review [PR#] - Code review mode for pull requests\n"
+                    "/pr-comments [PR#] - Fetch and analyze PR comments\n\n"
                     "[bold]Examples:[/bold]\n\n"
                     "/model - Show current model\n"
                     "/model claude-3-5-haiku-20241022 - Switch to Haiku\n"
+                    "/mcp - View connected MCP servers\n"
+                    "/review 123 - Review PR #123\n"
+                    "/pr-comments - Get comments from current PR\n"
                     "/export my-chat.md - Save conversation\n\n"
                     "[bold]Keyboard Shortcuts:[/bold]\n\n"
                     "Ctrl+C - Quit application\n"
@@ -248,36 +267,13 @@ class REPLScreen(Screen):
         elif command == "/cost":
             if self.orchestrator:
                 usage = self.orchestrator.total_usage
-                total_tokens = usage.input_tokens + usage.output_tokens
-
-                # Calculate costs (prices per million tokens for Sonnet 4.5)
-                # https://www.anthropic.com/api-pricing
-                input_cost = usage.input_tokens * 3.00 / 1_000_000
-                output_cost = usage.output_tokens * 15.00 / 1_000_000
-                cache_write_cost = usage.cache_creation_input_tokens * 3.75 / 1_000_000
-                cache_read_cost = usage.cache_read_input_tokens * 0.30 / 1_000_000
-                total_cost = (
-                    input_cost + output_cost + cache_write_cost + cache_read_cost
-                )
-
                 log.write(
-                    Panel(
-                        f"[bold]Token Usage:[/bold]\n\n"
-                        f"Input tokens: {usage.input_tokens:,}\n"
-                        f"Output tokens: {usage.output_tokens:,}\n"
-                        f"Cache creation: {usage.cache_creation_input_tokens:,}\n"
-                        f"Cache reads: {usage.cache_read_input_tokens:,}\n"
-                        f"Total: {total_tokens:,}\n\n"
-                        f"[bold]Estimated Cost:[/bold]\n\n"
-                        f"Input: ${input_cost:.4f}\n"
-                        f"Output: ${output_cost:.4f}\n"
-                        f"Cache writes: ${cache_write_cost:.4f}\n"
-                        f"Cache reads: ${cache_read_cost:.4f}\n"
-                        f"[bold cyan]Total: ${total_cost:.4f}[/bold cyan]\n\n"
-                        f"[dim]Prices for {self.model} (Sonnet 4.5)\n"
-                        f"May vary for other models[/dim]",
-                        title="📊 Usage Statistics & Costs",
-                        border_style="cyan",
+                    format_cost_info(
+                        input_tokens=usage.input_tokens,
+                        output_tokens=usage.output_tokens,
+                        cache_creation_tokens=usage.cache_creation_input_tokens,
+                        cache_read_tokens=usage.cache_read_input_tokens,
+                        model=self.model,
                     )
                 )
             else:
@@ -294,6 +290,54 @@ class REPLScreen(Screen):
                     border_style="cyan",
                 )
             )
+        elif command == "/mcp":
+            # Show MCP server status
+            mcp_status = get_mcp_status()
+
+            if not mcp_status["initialized"]:
+                log.write(
+                    Panel(
+                        "[yellow]MCP is not initialized.[/yellow]\n\n"
+                        "MCP (Model Context Protocol) allows Agent Smith to connect to\n"
+                        "external services like GitLab, Jira, databases, and more.\n\n"
+                        "[bold]To configure MCP servers:[/bold]\n"
+                        "1. Edit settings.toml in your config directory\n"
+                        "2. Add MCP server configurations\n"
+                        "3. Restart Agent Smith\n\n"
+                        "[dim]See documentation for examples[/dim]",
+                        title="📡 MCP Status",
+                        border_style="yellow",
+                    )
+                )
+            else:
+                servers = mcp_status["servers"]
+                server_status = mcp_status["server_status"]
+
+                status_lines = []
+                for server_name in servers:
+                    info = server_status.get(server_name, {})
+                    connected = info.get("connected", False)
+                    tools_count = info.get("tools_count", 0)
+                    prompts_count = info.get("prompts_count", 0)
+
+                    status_icon = "🟢" if connected else "🔴"
+                    status_lines.append(f"{status_icon} [bold]{server_name}[/bold]")
+                    status_lines.append(
+                        f"   Tools: {tools_count}, Prompts: {prompts_count}"
+                    )
+
+                status_text = "\n".join(status_lines)
+
+                log.write(
+                    Panel(
+                        f"[bold]MCP Servers ({len(servers)} registered):[/bold]\n\n"
+                        f"{status_text}\n\n"
+                        f"[bold cyan]Total: {mcp_status['tools_count']} tools, "
+                        f"{mcp_status['prompts_count']} prompts[/bold cyan]",
+                        title="📡 MCP Status",
+                        border_style="green",
+                    )
+                )
         elif command == "/doctor":
             # Run system diagnostics
             import sys
@@ -403,6 +447,97 @@ class REPLScreen(Screen):
                 )
             except Exception as e:
                 log.write(f"[red]Error exporting conversation: {e}[/red]")
+        elif command.startswith("/review"):
+            # Code review mode
+            parts = command.split(maxsplit=1)
+            pr_number = parts[1] if len(parts) > 1 else ""
+
+            # Create review prompt
+            review_prompt = f"""You are an expert code reviewer. Follow these steps:
+
+1. If no PR number is provided, use Bash("gh pr list") to show open PRs
+2. If a PR number is provided, use Bash("gh pr view {pr_number}") to get PR details
+3. Use Bash("gh pr diff {pr_number}") to get the diff
+4. Analyze the changes and provide a thorough code review that includes:
+   - Overview of what the PR does
+   - Analysis of code quality and style
+   - Specific suggestions for improvements
+   - Any potential issues or risks
+
+Keep your review concise but thorough. Focus on:
+- Code correctness
+- Following project conventions
+- Performance implications
+- Test coverage
+- Security considerations
+
+Format your review with clear sections and bullet points.
+
+PR number: {pr_number if pr_number else "(to be determined)"}"""
+
+            # Add as user message and process
+            log.write("")
+            log.write("[bold cyan]Starting code review mode...[/bold cyan]")
+            log.write("")
+
+            # Add to conversation
+            self.messages.append(Message.user(review_prompt))
+
+            # Start async processing
+            self.run_worker(self.process_llm_response(), exclusive=False)
+
+        elif command.startswith("/pr-comments"):
+            # PR comments analysis mode
+            parts = command.split(maxsplit=1)
+            args = parts[1] if len(parts) > 1 else ""
+
+            # Create PR comments prompt
+            pr_comments_prompt = f"""You are an AI assistant integrated into a git-based version control system. Your task is to fetch and display comments from a GitHub pull request.
+
+Follow these steps:
+
+1. Use Bash("gh pr view --json number,headRepository") to get the PR number and repository info
+2. Use Bash to run gh api commands to get PR-level and review comments:
+   - gh api /repos/{{owner}}/{{repo}}/issues/{{number}}/comments for PR-level comments
+   - gh api /repos/{{owner}}/{{repo}}/pulls/{{number}}/comments for review comments
+3. Parse and format all comments in a readable way
+4. Return ONLY the formatted comments, with no additional text
+
+Format the comments as:
+
+## Comments
+
+[For each comment thread:]
+- @author file.ts#line:
+  ```diff
+  [diff_hunk from the API response]
+  ```
+  > quoted comment text
+
+  [any replies indented]
+
+If there are no comments, return "No comments found."
+
+Remember:
+1. Only show the actual comments, no explanatory text
+2. Include both PR-level and code review comments
+3. Preserve the threading/nesting of comment replies
+4. Show the file and line number context for code review comments
+5. Use jq to parse the JSON responses from the GitHub API
+
+{f"Additional user input: {args}" if args else ""}"""
+
+            # Add as user message and process
+            log.write("")
+            log.write("[bold cyan]Fetching PR comments...[/bold cyan]")
+            log.write("")
+
+            # Add to conversation
+            self.messages.append(Message.user(pr_comments_prompt))
+
+            # Start async processing
+            self.run_worker(self.process_llm_response(), exclusive=False)
+
         else:
             log.write(f"[red]Unknown command: {command}[/red]")
             log.write("Type [cyan]/help[/cyan] for available commands")
@@ -412,7 +547,7 @@ class REPLScreen(Screen):
         log = self.query_one("#message-log", RichLog)
 
         if not self.orchestrator:
-            log.write("[red]Orchestrator not initialized[/red]")
+            log.write(format_error("Orchestrator not initialized"))
             return
 
         # Show thinking indicator
@@ -422,7 +557,8 @@ class REPLScreen(Screen):
         try:
             # Get response
             response_text = []
-            tool_uses = []
+            streaming_text = []
+            current_tool_uses = []
 
             async for event in self.orchestrator.query(
                 messages=self.messages,
@@ -430,23 +566,44 @@ class REPLScreen(Screen):
                 tools=default_tools.list_tools(),
             ):
                 if event["type"] == "text_delta":
-                    # Could show streaming text here in the future
-                    pass
+                    # Accumulate streaming text
+                    delta = event["delta"]
+                    streaming_text.append(delta)
+                    # For now, we accumulate and display at the end
+                    # Real-time streaming would require Live() context
+
+                elif event["type"] == "tool_use":
+                    # Show tool use with formatted display
+                    tool_name = event["name"]
+                    arguments = event.get("arguments", {})
+                    log.write(format_tool_use(tool_name, arguments))
+                    current_tool_uses.append((tool_name, arguments))
 
                 elif event["type"] == "tool_execution_start":
                     count = event["count"]
-                    log.write(f"[yellow]🔧 Using {count} tool(s)...[/yellow]")
+                    log.write(f"[yellow]🔧 Executing {count} tool(s)...[/yellow]")
 
                 elif event["type"] == "tool_use_result":
                     tool_name = event["name"]
                     result = event["result"]
-                    status = "✅" if not result.is_error else "❌"
-                    tool_uses.append(f"{status} {tool_name}")
-                    # Show real-time tool completion
-                    log.write(f"[dim]  {status} {tool_name}[/dim]")
+                    # Show formatted tool result
+                    log.write(
+                        format_tool_result(
+                            tool_name=tool_name,
+                            result=(
+                                result.content
+                                if hasattr(result, "content")
+                                else str(result)
+                            ),
+                            is_error=(
+                                result.is_error
+                                if hasattr(result, "is_error")
+                                else False
+                            ),
+                        )
+                    )
 
                 elif event["type"] == "message_complete":
-                    log.write("[dim]✨ Generating response...[/dim]")
                     message = event["message"]
                     # Extract text from content blocks
                     for block in message.content:
@@ -469,20 +626,15 @@ class REPLScreen(Screen):
             # Display response
             log.write("")  # Empty line
 
-            # Show assistant response
+            # Show assistant response with enhanced rendering
             if response_text:
-                log.write(
-                    Panel(
-                        Markdown("\n\n".join(response_text)),
-                        title="[bold green]Agent Smith[/bold green]",
-                        border_style="green",
-                    )
-                )
+                full_response = "\n\n".join(response_text)
+                log.write(message_renderer.render_assistant_message(full_response))
             else:
-                log.write("[yellow]No response from assistant[/yellow]")
+                log.write("[yellow]No text response from assistant[/yellow]")
 
         except Exception as e:
-            log.write(f"[red]Error: {str(e)}[/red]")
+            log.write(format_error(f"Error processing response: {str(e)}"))
 
     def action_clear(self) -> None:
         """Clear the message log."""
@@ -504,3 +656,6 @@ class REPLScreen(Screen):
         """Cleanup when screen is unmounted."""
         if self.orchestrator:
             await self.orchestrator.close()
+
+        # Shutdown MCP servers
+        await shutdown_mcp()

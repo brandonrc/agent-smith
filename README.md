@@ -11,7 +11,7 @@ Modern Python implementation of Agent Smith, a terminal-based AI coding assistan
 - ⚙️ XDG-compliant configuration
 - 🚀 Fast async I/O with asyncio
 - 📝 Type-safe with Pydantic
-- 🎯 Model Context Protocol (MCP) support
+- 🎯 **Model Context Protocol (MCP) support** - Connect to GitLab, Jira, databases, and more!
 
 ## Installation
 
@@ -169,18 +169,106 @@ black --check src/ tests/
 ruff check src/ tests/
 ```
 
+## MCP (Model Context Protocol) Integration
+
+Agent Smith supports MCP, allowing it to connect to external services and tools.
+
+### What is MCP?
+
+MCP is an open standard that enables AI applications to connect to external data sources and tools in a standardized way. Think of it like "USB-C for AI" - one protocol to connect to many services.
+
+### Supported MCP Servers
+
+Agent Smith can connect to any MCP-compatible server, including:
+
+- **GitLab** - Manage repositories, merge requests, issues
+- **Jira** - Create and manage tickets, projects, workflows
+- **Filesystem** - Secure file operations in allowed directories
+- **Databases** - PostgreSQL, MySQL, SQLite
+- **And many more...**
+
+### Quick Start with MCP
+
+1. **Install Node.js** (required for most MCP servers):
+```bash
+# macOS
+brew install node
+
+# Ubuntu/Debian
+curl -fsSL https://deb.nodesource.com/setup_18.x | sudo -E bash -
+sudo apt-get install -y nodejs
+```
+
+2. **Configure MCP servers** in `~/.config/agent-smith/settings.toml`:
+```toml
+[mcp]
+enabled = true
+
+[mcp.servers.gitlab]
+command = "npx"
+args = ["-y", "@modelcontextprotocol/server-gitlab"]
+env = {
+    GITLAB_TOKEN = "glpat-your-token-here",
+    GITLAB_URL = "https://gitlab.com"
+}
+enabled = true
+trusted = false  # Will prompt for approval on first use
+
+[mcp.servers.jira]
+command = "npx"
+args = ["-y", "@modelcontextprotocol/server-jira"]
+env = {
+    JIRA_URL = "https://your-company.atlassian.net",
+    JIRA_EMAIL = "your-email@company.com",
+    JIRA_API_TOKEN = "your-api-token"
+}
+enabled = true
+trusted = false
+```
+
+3. **Start Agent Smith** - it will prompt you to approve each MCP server on first use
+
+4. **Use MCP tools** - Claude can now use GitLab, Jira, etc.:
+```
+> "List my open GitLab merge requests"
+> "Create a Jira ticket for this bug"
+```
+
+5. **Check MCP status** with `/mcp` command in the REPL
+
+### MCP Commands
+
+- `/mcp` - Show MCP server status and tool counts
+- `/tools` - List all available tools (including MCP tools)
+
+### Security
+
+- **Server Approval** - First-time use requires explicit user approval
+- **Trust Management** - Approved servers are tracked in `~/.local/share/agent-smith/mcp_trust.json`
+- **Environment Isolation** - Each server runs in its own subprocess
+- **Configuration Changes** - Reapproval required if server config changes
+
+### Available MCP Servers
+
+Find more MCP servers at: https://github.com/modelcontextprotocol/servers
+
 ## Architecture
 
 ```
 src/agent_smith/
 ├── cli.py              # CLI entry point
 ├── config/             # Configuration management (dynaconf)
+├── mcp/                # MCP integration
+│   ├── client.py       # MCP client for single server
+│   ├── manager.py      # Multi-server management
+│   ├── discovery.py    # Tool discovery and registration
+│   └── trust.py        # Security and approval system
 ├── models/             # Pydantic data models
 ├── ui/                 # Textual UI components
 │   ├── app.py          # Main application
 │   ├── repl.py         # Interactive REPL screen
 │   └── help_screen.py  # Help screen
-├── tools/              # Tool system (9 tools)
+├── tools/              # Tool system (13+ tools)
 │   ├── bash_tool.py
 │   ├── file_read_tool.py
 │   ├── file_write_tool.py
@@ -189,9 +277,12 @@ src/agent_smith/
 │   ├── grep_tool.py
 │   ├── list_tool.py
 │   ├── agent_tool.py
-│   └── think_tool.py
+│   ├── think_tool.py
+│   ├── mcp_tool.py     # MCP tool wrapper
+│   └── ...
 ├── services/           # LLM API clients
 │   ├── claude.py       # Anthropic Claude
 │   └── openai.py       # OpenAI GPT
-└── query.py            # Main query orchestration
+├── query.py            # Main query orchestration
+└── mcp_integration.py  # MCP initialization
 ```
