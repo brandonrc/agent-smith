@@ -181,18 +181,23 @@ class REPLScreen(Screen):
             log.write(
                 Panel(
                     "[bold]Available Commands:[/bold]\n\n"
-                    "/help - Show this help\n"
-                    "/clear - Clear message history\n"
-                    "/reset - Reset conversation\n"
-                    "/model - Show current model\n"
-                    "/cost - Show token usage and cost\n"
-                    "/tools - List available tools\n"
+                    "/help - Show this help message\n"
+                    "/clear - Clear screen (keeps conversation)\n"
+                    "/reset - Reset conversation and clear history\n"
+                    "/model [name] - Show or change current model\n"
+                    "/cost - Show detailed token usage and estimated costs\n"
+                    "/tools - List all available tools\n"
+                    "/doctor - Run system diagnostics\n"
                     "/export [filename] - Export conversation to file\n\n"
+                    "[bold]Examples:[/bold]\n\n"
+                    "/model - Show current model\n"
+                    "/model claude-3-5-haiku-20241022 - Switch to Haiku\n"
+                    "/export my-chat.md - Save conversation\n\n"
                     "[bold]Keyboard Shortcuts:[/bold]\n\n"
-                    "Ctrl+C - Quit\n"
+                    "Ctrl+C - Quit application\n"
                     "Ctrl+L - Clear screen\n"
                     "Ctrl+R - Reset conversation",
-                    title="Help",
+                    title="📚 Help",
                     border_style="blue",
                 )
             )
@@ -206,12 +211,55 @@ class REPLScreen(Screen):
                 self.orchestrator.total_usage.output_tokens = 0
             log.clear()
             self.notify("Conversation reset")
-        elif command == "/model":
-            log.write(f"Current model: [cyan]{self.model}[/cyan]")
+        elif command.startswith("/model"):
+            # Parse model name
+            parts = command.split(maxsplit=1)
+            if len(parts) > 1:
+                # Change model
+                new_model = parts[1]
+                old_model = self.model
+                self.model = new_model
+
+                # Reinitialize orchestrator with new model
+                if self.orchestrator:
+                    self.orchestrator.model = new_model
+
+                log.write(
+                    f"[green]✓[/green] Model changed from [cyan]{old_model}[/cyan] to [cyan]{new_model}[/cyan]"
+                )
+                self.notify(f"Model: {new_model}")
+            else:
+                # Show current model
+                log.write(
+                    Panel(
+                        f"[bold]Current Configuration:[/bold]\n\n"
+                        f"Provider: [cyan]{self.provider}[/cyan]\n"
+                        f"Model: [cyan]{self.model}[/cyan]\n\n"
+                        f"[bold]Available Models (Anthropic):[/bold]\n"
+                        f"- claude-sonnet-4-5-20250929 (Sonnet 4.5 - Latest)\n"
+                        f"- claude-3-5-sonnet-20241022 (Sonnet 3.5)\n"
+                        f"- claude-3-5-haiku-20241022 (Haiku - Fast & Cheap)\n"
+                        f"- claude-3-opus-20240229 (Opus - Most Capable)\n\n"
+                        f"[dim]Use /model <name> to switch models[/dim]",
+                        title="🤖 Model Configuration",
+                        border_style="cyan",
+                    )
+                )
         elif command == "/cost":
             if self.orchestrator:
                 usage = self.orchestrator.total_usage
                 total_tokens = usage.input_tokens + usage.output_tokens
+
+                # Calculate costs (prices per million tokens for Sonnet 4.5)
+                # https://www.anthropic.com/api-pricing
+                input_cost = usage.input_tokens * 3.00 / 1_000_000
+                output_cost = usage.output_tokens * 15.00 / 1_000_000
+                cache_write_cost = usage.cache_creation_input_tokens * 3.75 / 1_000_000
+                cache_read_cost = usage.cache_read_input_tokens * 0.30 / 1_000_000
+                total_cost = (
+                    input_cost + output_cost + cache_write_cost + cache_read_cost
+                )
+
                 log.write(
                     Panel(
                         f"[bold]Token Usage:[/bold]\n\n"
@@ -219,11 +267,21 @@ class REPLScreen(Screen):
                         f"Output tokens: {usage.output_tokens:,}\n"
                         f"Cache creation: {usage.cache_creation_input_tokens:,}\n"
                         f"Cache reads: {usage.cache_read_input_tokens:,}\n"
-                        f"Total: {total_tokens:,}",
-                        title="📊 Usage Statistics",
+                        f"Total: {total_tokens:,}\n\n"
+                        f"[bold]Estimated Cost:[/bold]\n\n"
+                        f"Input: ${input_cost:.4f}\n"
+                        f"Output: ${output_cost:.4f}\n"
+                        f"Cache writes: ${cache_write_cost:.4f}\n"
+                        f"Cache reads: ${cache_read_cost:.4f}\n"
+                        f"[bold cyan]Total: ${total_cost:.4f}[/bold cyan]\n\n"
+                        f"[dim]Prices for {self.model} (Sonnet 4.5)\n"
+                        f"May vary for other models[/dim]",
+                        title="📊 Usage Statistics & Costs",
                         border_style="cyan",
                     )
                 )
+            else:
+                log.write("[yellow]No usage data available yet[/yellow]")
         elif command == "/tools":
             tools_list = "\n".join(
                 f"- {tool.name}: {tool.description.split('.')[0]}"
@@ -234,6 +292,80 @@ class REPLScreen(Screen):
                     f"[bold]Available Tools ({len(default_tools)} total):[/bold]\n\n{tools_list}",
                     title="🔧 Tools",
                     border_style="cyan",
+                )
+            )
+        elif command == "/doctor":
+            # Run system diagnostics
+            import sys
+
+            from platformdirs import user_config_dir
+
+            issues = []
+            checks = []
+
+            # Check Python version
+            py_version = f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}"
+            if sys.version_info >= (3, 11):
+                checks.append(f"✅ Python {py_version} (OK)")
+            else:
+                checks.append(f"❌ Python {py_version} (Need 3.11+)")
+                issues.append("Python version too old")
+
+            # Check API keys
+            api_key = get_api_key(self.provider)
+            if api_key:
+                checks.append(f"✅ {self.provider.capitalize()} API key configured")
+            else:
+                checks.append(f"❌ {self.provider.capitalize()} API key not found")
+                issues.append(
+                    f"Set API key with: smith config set {self.provider}_api_key YOUR_KEY"
+                )
+
+            # Check config directory
+            config_dir = Path(user_config_dir("agent-smith"))
+            if config_dir.exists():
+                checks.append(f"✅ Config directory: {config_dir}")
+            else:
+                checks.append(f"⚠️  Config directory missing: {config_dir}")
+
+            # Check tools
+            tool_count = len(default_tools.list_tools())
+            checks.append(f"✅ {tool_count} tools registered")
+
+            # Check orchestrator
+            if self.orchestrator:
+                checks.append("✅ Query orchestrator initialized")
+                checks.append(f"✅ Current model: {self.model}")
+            else:
+                checks.append("❌ Query orchestrator not initialized")
+                issues.append("Orchestrator initialization failed")
+
+            # Check memory directory
+            memory_dir = config_dir / "memory"
+            if memory_dir.exists():
+                memory_files = len(list(memory_dir.rglob("*")))
+                checks.append(f"✅ Memory directory: {memory_files} file(s)")
+            else:
+                checks.append("ℹ️  Memory directory not created yet")
+
+            # Build report
+            status = (
+                "✅ All systems operational"
+                if not issues
+                else f"⚠️  {len(issues)} issue(s) found"
+            )
+            report = f"[bold]{status}[/bold]\n\n"
+            report += "\n".join(checks)
+
+            if issues:
+                report += "\n\n[bold red]Issues:[/bold red]\n"
+                report += "\n".join(f"• {issue}" for issue in issues)
+
+            log.write(
+                Panel(
+                    report,
+                    title="🏥 System Diagnostics",
+                    border_style="green" if not issues else "yellow",
                 )
             )
         elif command.startswith("/export"):
